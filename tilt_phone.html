@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#101214">
+<title>기울기 미로 조종기</title>
+<style>
+/* 손에 쥐는 조종기: 어두운 화면 하나에 큰 원판, 아래에 엄지로 누를 버튼 */
+:root {
+  --bg: #101214; --panel: #1a1d21; --line: #2e333a; --ink: #eceae4; --muted: #9aa0a7;
+  --accent: #f08c3e; --ok: #4fc08d; --ble: #5aa8ff; --warn: #f0745c;
+  --f: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--f);
+  padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  display: flex; flex-direction: column; gap: 12px; user-select: none; -webkit-user-select: none; overscroll-behavior: none;
+}
+header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+h1 { font-size: 18px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
+.chip { font-size: 13px; padding: 4px 10px; border-radius: 99px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.chip.on { color: #fff; background: var(--ble); border-color: var(--ble); }
+.chip.warn { color: #fff; background: var(--warn); border-color: var(--warn); }
+.stage { flex: 1; min-height: 0; display: grid; place-items: center; }
+.plate { position: relative; width: min(86vw, 52vh, 420px); aspect-ratio: 1; border-radius: 50%; background: var(--panel); border: 2px solid var(--line); touch-action: none; }
+.plate .ring { position: absolute; inset: 25%; border-radius: 50%; border: 1px solid var(--line); }
+.plate .h, .plate .v { position: absolute; background: var(--line); }
+.plate .h { left: 6%; right: 6%; top: 50%; height: 1px; }
+.plate .v { top: 6%; bottom: 6%; left: 50%; width: 1px; }
+.plate .front { position: absolute; top: -26px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--accent); white-space: nowrap; }
+.ball { position: absolute; width: 16%; aspect-ratio: 1; border-radius: 50%; left: 42%; top: 42%;
+  background: radial-gradient(circle at 35% 30%, #fff 0 12%, #c9ced5 25%, #7d848d 75%); box-shadow: 0 3px 10px rgba(0,0,0,.5); }
+.ball.max { outline: 3px solid var(--warn); outline-offset: 3px; }
+.real { position: absolute; width: 9%; aspect-ratio: 1; border-radius: 50%; left: 45.5%; top: 45.5%; border: 3px solid var(--ok); opacity: 0; transition: opacity .3s; }
+.real.show { opacity: 1; }
+.readout { display: flex; justify-content: center; gap: 18px; font-family: var(--mono); font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--ink); font-weight: 500; }
+.readout .g { color: var(--ok); }
+.msg { font-size: 14px; line-height: 1.5; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.msg[hidden] { display: none; }
+.msg b { color: var(--ink); }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+button { font: inherit; font-size: 16px; font-weight: 600; min-height: 54px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+button:active { transform: scale(.98); }
+button.primary { background: var(--ble); border-color: var(--ble); color: #fff; }
+button.hold[aria-pressed="true"] { background: var(--warn); border-color: var(--warn); color: #fff; }
+button[hidden] { display: none; }
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.sens { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; font-size: 14px; color: var(--muted); }
+.sens input { width: 100%; accent-color: var(--accent); }
+.sens output { font-family: var(--mono); color: var(--ink); min-width: 3.5em; text-align: right; }
+</style>
+</head>
+<body>
+<header>
+  <h1>기울기 미로 조종기</h1>
+  <span class="chip" id="chip">연결 안 됨</span>
+</header>
+
+<div class="msg" id="msg" hidden></div>
+
+<div class="stage">
+  <div class="plate" id="plate" aria-label="기울기 표시. 센서가 없으면 끌어서 조종">
+    <span class="front">▲ 미로 쪽</span>
+    <div class="h"></div><div class="v"></div><div class="ring"></div>
+    <div class="real" id="real" title="실제 미로판"></div>
+    <div class="ball" id="ball"></div>
+  </div>
+</div>
+
+<div class="readout">
+  <span>오른쪽 <b id="rR">0.0°</b></span>
+  <span>앞쪽 <b id="rF">0.0°</b></span>
+  <span class="g" id="rB">판 —</span>
+</div>
+
+<div class="sens"><label for="sens">민감도</label><input id="sens" type="range" min="0.5" max="1.6" step="0.05" value="1"><output id="sensO">1.00×</output></div>
+
+<button class="primary" id="btnConnect">미로 연결 (블루투스)</button>
+<button id="btnSensor" hidden>기울기 센서 켜기</button>
+<div class="row">
+  <button id="btnZero">지금 자세를 수평으로</button>
+  <button class="hold" id="btnPause" aria-pressed="false">일시정지</button>
+</div>
+
+<script>
+// ===== 미로 쪽 펌웨어(USE_BLE)와 같아야 하는 값 =====
+const SERVICE = '7f1a0001-6d3c-4b2a-9e5f-1b2c3d4e5f60';
+const TILT    = '7f1a0002-6d3c-4b2a-9e5f-1b2c3d4e5f60';   // 폰 → 미로: int16 오른쪽, int16 앞쪽 (0.01°), uint8 플래그
+const STATUS  = '7f1a0003-6d3c-4b2a-9e5f-1b2c3d4e5f60';   // 미로 → 폰: int16 판X, int16 판Y, uint8 입력원
+const SEND_HZ = 40;
+const VIEW_RANGE = 25;          // 원판 가장자리 = 손 기울기 25° (미로판 약 8°)
+
+const $ = id => document.getElementById(id);
+const store = { get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+
+let raw = null;                  // 센서 원래값 [오른쪽, 앞쪽]
+let zero = store.get('zero', [0, 0]);
+let sens = store.get('sens', 1);
+let paused = false, dragVec = null, sensorSeen = false;
+let device = null, tiltChar = null, writing = false, sentCount = 0;
+let board = null, boardAt = 0;
+$('sens').value = sens; $('sensO').textContent = (+sens).toFixed(2) + '×';
+
+function say(html) { const m = $('msg'); if (!html) { m.hidden = true; return; } m.innerHTML = html; m.hidden = false; }
+function chip(text, cls) { const c = $('chip'); c.textContent = text; c.className = 'chip' + (cls ? ' ' + cls : ''); }
+
+// ===== 환경 점검 =====
+const hasBLE = !!(navigator.bluetooth && navigator.bluetooth.requestDevice);
+if (!window.isSecureContext) {
+  say('이 페이지는 <b>https 주소</b>로 열어야 센서와 블루투스를 쓸 수 있습니다. GitHub Pages 같은 곳에 올려서 여세요.');
+} else if (!hasBLE) {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  say(ios ? '아이폰 사파리는 웹 블루투스를 지원하지 않습니다. 앱스토어의 <b>Bluefy</b> 브라우저로 이 주소를 여세요.'
+          : '이 브라우저는 웹 블루투스를 지원하지 않습니다. 안드로이드는 <b>크롬</b>으로 열어 주세요.');
+}
+
+// ===== 기울기 센서 =====
+// 세로로 들고, 화면 위쪽이 미로를 향하게. gamma: 오른쪽이 내려가면 +, beta: 위쪽이 내려가면 −
+function screenAngle() {
+  const a = (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0);
+  return ((a % 360) + 360) % 360;
+}
+function onOrient(e) {
+  if (e.beta == null || e.gamma == null) return;
+  sensorSeen = true;
+  const b = e.beta, g = e.gamma, a = screenAngle();
+  let r, f;
+  if (a === 90) { r = b; f = g; }
+  else if (a === 180) { r = -g; f = b; }
+  else if (a === 270) { r = -b; f = -g; }
+  else { r = g; f = -b; }
+  raw = [r, f];
+}
+function startSensor() {
+  window.addEventListener('deviceorientation', onOrient);
+  setTimeout(() => { if (!sensorSeen) say('기울기 센서 값이 들어오지 않습니다. 센서가 없는 기기라면 원판을 손가락으로 끌어서 조종할 수 있습니다.'); }, 1500);
+}
+if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+  $('btnSensor').hidden = false;                       // 아이폰: 버튼을 눌러 허락받아야 함
+  $('btnSensor').addEventListener('click', async () => {
+    try { const r = await DeviceOrientationEvent.requestPermission(); if (r === 'granted') { $('btnSensor').hidden = true; startSensor(); } else say('기울기 센서 사용을 허락해야 조종할 수 있습니다.'); }
+    catch (e) { say('센서를 켤 수 없습니다: ' + e.message); }
+  });
+} else startSensor();
+
+// 센서가 없을 때(컴퓨터 등): 원판 끌기
+const plate = $('plate');
+function dragMove(e) {
+  const r = plate.getBoundingClientRect();
+  let x = (e.clientX - r.left - r.width / 2) / (r.width / 2), y = -(e.clientY - r.top - r.height / 2) / (r.height / 2);
+  const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; }
+  dragVec = [x * VIEW_RANGE, y * VIEW_RANGE];
+}
+plate.addEventListener('pointerdown', e => { if (sensorSeen) return; plate.setPointerCapture(e.pointerId); dragMove(e); });
+plate.addEventListener('pointermove', e => { if (dragVec) dragMove(e); });
+['pointerup', 'pointercancel'].forEach(t => plate.addEventListener(t, () => { dragVec = null; }));
+
+function current() {           // 미로로 보낼 손 기울기 (°)
+  if (paused) return [0, 0];
+  let v = dragVec ? dragVec : raw ? [raw[0] - zero[0], raw[1] - zero[1]] : [0, 0];
+  return [Math.max(-60, Math.min(60, v[0] * sens)), Math.max(-60, Math.min(60, v[1] * sens))];
+}
+
+// ===== 버튼 =====
+$('btnZero').addEventListener('click', () => {
+  if (!raw) return;
+  zero = raw.slice(); store.set('zero', zero);
+  if (navigator.vibrate) navigator.vibrate(40);
+});
+$('btnPause').addEventListener('click', () => {
+  paused = !paused; $('btnPause').setAttribute('aria-pressed', paused); $('btnPause').textContent = paused ? '다시 조종' : '일시정지';
+});
+$('sens').addEventListener('input', e => { sens = +e.target.value; $('sensO').textContent = sens.toFixed(2) + '×'; store.set('sens', sens); });
+
+// ===== 블루투스 =====
+async function connect() {
+  if (device && device.gatt.connected) { device.gatt.disconnect(); return; }
+  if (!hasBLE) return;
+  try {
+    chip('찾는 중…');
+    device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'TiltMaze' }, { services: [SERVICE] }], optionalServices: [SERVICE] });
+    device.addEventListener('gattserverdisconnected', onDisconnected);
+    chip('연결 중…');
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(SERVICE);
+    tiltChar = await svc.getCharacteristic(TILT);
+    try {
+      const st = await svc.getCharacteristic(STATUS);
+      st.addEventListener('characteristicvaluechanged', e => {
+        const d = e.target.value;
+        if (d.byteLength >= 4) { board = [d.getInt16(0, true) / 100, d.getInt16(2, true) / 100]; boardAt = performance.now(); }
+      });
+      await st.startNotifications();
+    } catch (e) { /* 상태 알림이 없어도 조종은 됨 */ }
+    chip(device.name || '연결됨', 'on');
+    $('btnConnect').textContent = '연결 끊기';
+    $('btnConnect').classList.remove('primary');
+    say('');
+    if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
+    keepAwake();
+  } catch (e) {
+    tiltChar = null;
+    if (e && e.name === 'NotFoundError') chip('연결 안 됨');
+    else { chip('연결 실패', 'warn'); say('연결하지 못했습니다. 미로 전원이 켜져 있는지, 다른 폰이 이미 연결돼 있지 않은지 확인하세요.' + (e && e.message ? '<br><small>' + e.message + '</small>' : '')); }
+  }
+}
+function onDisconnected() {
+  tiltChar = null; board = null;
+  chip('연결 끊김', 'warn');
+  $('btnConnect').textContent = '미로 다시 연결'; $('btnConnect').classList.add('primary');
+}
+$('btnConnect').addEventListener('click', connect);
+
+async function send() {
+  if (!tiltChar || writing) return;
+  const [r, f] = current();
+  const buf = new DataView(new ArrayBuffer(5));
+  buf.setInt16(0, Math.round(r * 100), true);
+  buf.setInt16(2, Math.round(f * 100), true);
+  buf.setUint8(4, paused ? 1 : 0);
+  writing = true;
+  try {
+    if (tiltChar.writeValueWithoutResponse) await tiltChar.writeValueWithoutResponse(buf.buffer);
+    else await tiltChar.writeValue(buf.buffer);
+    sentCount++;
+  } catch (e) { /* 한 번 놓쳐도 다음 주기에 다시 보냄 */ }
+  writing = false;
+}
+setInterval(send, 1000 / SEND_HZ);
+
+// 화면 꺼짐 방지
+let wakeLock = null;
+async function keepAwake() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && tiltChar) keepAwake(); });
+
+// ===== 화면 =====
+const ball = $('ball'), real = $('real');
+function draw() {
+  const [r, f] = current();
+  let x = r / VIEW_RANGE, y = f / VIEW_RANGE;
+  const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; }
+  ball.style.left = (42 + x * 42) + '%'; ball.style.top = (42 - y * 42) + '%';
+  ball.classList.toggle('max', l >= 1);
+  $('rR').textContent = (r >= 0 ? '+' : '') + r.toFixed(1) + '°';
+  $('rF').textContent = (f >= 0 ? '+' : '') + f.toFixed(1) + '°';
+  const fresh = board && performance.now() - boardAt < 600;
+  real.classList.toggle('show', !!fresh);
+  if (fresh) {
+    const bx = Math.max(-1, Math.min(1, board[0] / 8)), by = Math.max(-1, Math.min(1, board[1] / 8));
+    real.style.left = (45.5 + bx * 45.5) + '%'; real.style.top = (45.5 - by * 45.5) + '%';
+    $('rB').textContent = '판 ' + board[0].toFixed(1) + '° / ' + board[1].toFixed(1) + '°';
+  } else $('rB').textContent = '판 —';
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
