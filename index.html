@@ -26,8 +26,8 @@ h1 { font-size: 18px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
 .chip { font-size: 13px; padding: 4px 10px; border-radius: 99px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
 .chip.on { color: #fff; background: var(--ble); border-color: var(--ble); }
 .chip.warn { color: #fff; background: var(--warn); border-color: var(--warn); }
-.stage { flex: 1; min-height: 0; display: grid; place-items: center; }
-.plate { position: relative; width: min(86vw, 52vh, 420px); aspect-ratio: 1; border-radius: 50%; background: var(--panel); border: 2px solid var(--line); touch-action: none; }
+.stage { flex: 1; min-height: 120px; display: grid; place-items: center; container-type: size; }
+.plate { position: relative; width: min(86vw, 52vh, 420px); width: min(86vw, calc(100cqh - 34px), 420px); aspect-ratio: 1; border-radius: 50%; background: var(--panel); border: 2px solid var(--line); touch-action: none; }
 .plate .ring { position: absolute; inset: 25%; border-radius: 50%; border: 1px solid var(--line); }
 .plate .h, .plate .v { position: absolute; background: var(--line); }
 .plate .h { left: 6%; right: 6%; top: 50%; height: 1px; }
@@ -43,7 +43,9 @@ h1 { font-size: 18px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
 .readout .g { color: var(--ok); }
 .msg { font-size: 14px; line-height: 1.5; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
 .msg[hidden] { display: none; }
+.msg { max-height: 46vh; overflow-y: auto; user-select: text; -webkit-user-select: text; }
 .msg b { color: var(--ink); }
+.msg ol { margin: 6px 0; padding-left: 20px; } .msg li { margin: 2px 0; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 button { font: inherit; font-size: 16px; font-weight: 600; min-height: 54px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
 button:active { transform: scale(.98); }
@@ -82,6 +84,7 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 <div class="sens"><label for="sens">민감도</label><input id="sens" type="range" min="0.5" max="1.6" step="0.05" value="1"><output id="sensO">1.00×</output></div>
 
 <button class="primary" id="btnConnect">미로 연결 (블루투스)</button>
+<button id="btnScanAll" hidden>목록에 안 보이면: 주변 기기 전부 보기</button>
 <button id="btnSensor" hidden>기울기 센서 켜기</button>
 <div class="row">
   <button id="btnZero">지금 자세를 수평으로</button>
@@ -180,16 +183,27 @@ $('btnPause').addEventListener('click', () => {
 $('sens').addEventListener('input', e => { sens = +e.target.value; $('sensO').textContent = sens.toFixed(2) + '×'; store.set('sens', sens); });
 
 // ===== 블루투스 =====
-async function connect() {
+const HELP = '목록에 <b>TiltMaze</b>가 안 보이면 차례로 확인하세요.<ol>'
+  + '<li>미로 ESP32가 켜져 있고, 시리얼 모니터(115200)에 <b>블루투스 이름: TiltMaze-…</b> 줄이 나오는지 (안 나오면 블루투스 들어간 펌웨어를 다시 올리기)</li>'
+  + '<li>폰의 <b>블루투스</b>와 <b>위치</b>가 모두 켜져 있는지, 크롬에 <b>근처 기기</b>(또는 위치) 권한이 허용돼 있는지</li>'
+  + '<li>폰 <b>설정 → 블루투스</b>에서 TiltMaze를 직접 페어링하지 않았는지 (했다면 \'등록 해제\')</li>'
+  + '<li>다른 폰이나 탭이 이미 연결돼 있지 않은지 (미로는 한 번에 한 대만 연결됩니다)</li>'
+  + '<li>미로 ESP32의 <b>EN(리셋)</b> 버튼을 한 번 누르고 다시 찾기</li></ol>'
+  + '아래 <b>주변 기기 전부 보기</b>로 이름 없이도 찾아볼 수 있습니다.';
+async function connect(all) {
   if (device && device.gatt.connected) { device.gatt.disconnect(); return; }
   if (!hasBLE) return;
   try {
     chip('찾는 중…');
-    device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'TiltMaze' }, { services: [SERVICE] }], optionalServices: [SERVICE] });
+    device = await navigator.bluetooth.requestDevice(all === true
+      ? { acceptAllDevices: true, optionalServices: [SERVICE] }
+      : { filters: [{ namePrefix: 'TiltMaze' }, { services: [SERVICE] }], optionalServices: [SERVICE] });
     device.addEventListener('gattserverdisconnected', onDisconnected);
     chip('연결 중…');
     const server = await device.gatt.connect();
-    const svc = await server.getPrimaryService(SERVICE);
+    let svc;
+    try { svc = await server.getPrimaryService(SERVICE); }
+    catch (e) { device.gatt.disconnect(); throw new Error('이 기기에는 미로 서비스가 없습니다. 다른 기기를 골랐거나, 미로 ESP32에 블루투스(USE_BLE 1) 펌웨어가 올라가 있지 않습니다.'); }
     tiltChar = await svc.getCharacteristic(TILT);
     try {
       const st = await svc.getCharacteristic(STATUS);
@@ -202,12 +216,12 @@ async function connect() {
     chip(device.name || '연결됨', 'on');
     $('btnConnect').textContent = '연결 끊기';
     $('btnConnect').classList.remove('primary');
-    say('');
+    say(''); $('btnScanAll').hidden = true;
     if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
     keepAwake();
   } catch (e) {
     tiltChar = null;
-    if (e && e.name === 'NotFoundError') chip('연결 안 됨');
+    if (e && e.name === 'NotFoundError') { chip('연결 안 됨'); say(HELP); $('btnScanAll').hidden = false; }
     else { chip('연결 실패', 'warn'); say('연결하지 못했습니다. 미로 전원이 켜져 있는지, 다른 폰이 이미 연결돼 있지 않은지 확인하세요.' + (e && e.message ? '<br><small>' + e.message + '</small>' : '')); }
   }
 }
@@ -216,7 +230,8 @@ function onDisconnected() {
   chip('연결 끊김', 'warn');
   $('btnConnect').textContent = '미로 다시 연결'; $('btnConnect').classList.add('primary');
 }
-$('btnConnect').addEventListener('click', connect);
+$('btnConnect').addEventListener('click', () => connect(false));
+$('btnScanAll').addEventListener('click', () => connect(true));
 
 async function send() {
   if (!tiltChar || writing) return;
