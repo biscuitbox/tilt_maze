@@ -241,8 +241,10 @@ let side = store.get('side', 'plaque');
 if (!SIDES[side]) side = 'plaque';
 $('side').value = side;
 $('side').addEventListener('change', e => { side = e.target.value; store.set('side', side); if (navigator.vibrate) navigator.vibrate(30); });
-const toBoard = ([r, f]) => { const S = SIDES[side]; return [r * S.r[0] + f * S.f[0], r * S.r[1] + f * S.f[1]]; };
-const toMine = ([x, y]) => { const S = SIDES[side]; return [x * S.r[0] + y * S.r[1], x * S.f[0] + y * S.f[1]]; };
+// 실제 미로에서 확인: 두 축이 모두 반대로 움직여서 뒤집음 (-1). 다시 반대가 되면 1로 바꾸면 됩니다.
+const AXIS_FLIP = -1;
+const toBoard = ([r, f]) => { const S = SIDES[side], k = AXIS_FLIP; return [k * (r * S.r[0] + f * S.f[0]), k * (r * S.r[1] + f * S.f[1])]; };
+const toMine = ([x, y]) => { const S = SIDES[side], k = AXIS_FLIP; return [k * (x * S.r[0] + y * S.r[1]), k * (x * S.f[0] + y * S.f[1])]; };
 
 // ===== 버튼 =====
 $('btnZero').addEventListener('click', () => {
@@ -377,7 +379,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ===== 기록 (시작·도착 버튼, 사이트 순위: 파이어베이스 Firestore) =====
-const DB = 'https://firestore.googleapis.com/v1/projects/science-toolbox-7ff3d/databases/(default)/documents';
+const DB = 'https://firestore.googleapis.com/v1/projects/tilt-maze-66507/databases/(default)/documents';
 const COL = 'tiltmaze_real_records';
 const fmt = t => { const m = Math.floor(t / 60), s = t % 60; return String(m).padStart(2, '0') + ':' + s.toFixed(1).padStart(4, '0'); };
 let runState = 'idle', runT0 = 0, runT = 0, countTimer = null, lastId = store.get('lastRecId', null);
